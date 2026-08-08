@@ -4,11 +4,8 @@ import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, Browser
 import pino from 'pino'
 import fs from 'fs'
 import path from 'path'
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import { spawn } from 'child_process'
 import { pathToFileURL } from 'url'
-
-const execAsync = promisify(exec)
 
 const app = express()
 app.use(express.json())
@@ -32,22 +29,44 @@ const REPO_CONFIG = {
 }
 const repoReady = { v1: false, v2: false } // true seulement une fois clone + install terminés
 
+// Exécute une commande avec logs en direct + timeout strict (tue le process s'il dépasse le délai)
+function runCmd(cmd, args, opts = {}, timeoutMs = 5 * 60 * 1000) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(cmd, args, opts)
+        let timedOut = false
+        const timer = setTimeout(() => {
+            timedOut = true
+            try { child.kill('SIGKILL') } catch (e) {}
+        }, timeoutMs)
+
+        child.stdout?.on('data', d => process.stdout.write(`[${cmd}] ${d}`))
+        child.stderr?.on('data', d => process.stderr.write(`[${cmd}] ${d}`))
+
+        child.on('close', code => {
+            clearTimeout(timer)
+            if (timedOut) return reject(new Error(`${cmd} a dépassé ${Math.round(timeoutMs / 1000)}s, process tué`))
+            if (code !== 0) return reject(new Error(`${cmd} a échoué (code ${code})`))
+            resolve()
+        })
+        child.on('error', err => { clearTimeout(timer); reject(err) })
+    })
+}
+
 async function cloneOrUpdateRepo(key) {
     const { url, dir } = REPO_CONFIG[key]
-    const opts = { maxBuffer: 1024 * 1024 * 20 }
     try {
         if (!fs.existsSync(dir)) {
             console.log(`📥 Clonage du repo ${key} (${url})...`)
             fs.mkdirSync(REPOS_DIR, { recursive: true })
-            await execAsync(`git clone --depth 1 "${url}" "${dir}"`, opts)
+            await runCmd('git', ['clone', '--depth', '1', url, dir], {}, 3 * 60 * 1000)
         } else {
             console.log(`🔄 Mise à jour du repo ${key}...`)
-            try { await execAsync(`git -C "${dir}" pull --ff-only`, opts) }
+            try { await runCmd('git', ['-C', dir, 'pull', '--ff-only'], {}, 60 * 1000) }
             catch (e) { console.error(`⚠️ Pull échoué pour ${key}, on garde la version locale existante:`, e.message) }
         }
         if (fs.existsSync(path.join(dir, 'package.json')) && !fs.existsSync(path.join(dir, 'node_modules'))) {
             console.log(`📦 Installation des dépendances du repo ${key}...`)
-            await execAsync('npm install --omit=dev', { ...opts, cwd: dir })
+            await runCmd('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--prefer-offline'], { cwd: dir }, 8 * 60 * 1000)
         }
         repoReady[key] = true
         console.log(`✅ Repo ${key} prêt`)
@@ -56,10 +75,11 @@ async function cloneOrUpdateRepo(key) {
     }
 }
 
-// Ne bloque JAMAIS le serveur HTTP, mais installe un repo à la fois (évite de saturer le CPU/RAM en parallèle)
-async function prepareRepos() {
+// Ne bloque JAMAIS le serveur HTTP : v1 et v2 se préparent en parallèle, chacun avec son propre timeout
+// (un blocage sur l'un n'empêche plus l'autre d'avancer)
+function prepareRepos() {
     for (const key of Object.keys(REPO_CONFIG)) {
-        try { await cloneOrUpdateRepo(key) } catch (e) { console.error(`Erreur repo ${key}:`, e.message) }
+        cloneOrUpdateRepo(key).catch(e => console.error(`Erreur repo ${key}:`, e.message))
     }
 }
 
