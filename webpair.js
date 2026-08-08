@@ -4,8 +4,11 @@ import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, Browser
 import pino from 'pino'
 import fs from 'fs'
 import path from 'path'
-import { execSync } from 'child_process'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import { pathToFileURL } from 'url'
+
+const execAsync = promisify(exec)
 
 const app = express()
 app.use(express.json())
@@ -27,30 +30,37 @@ const REPO_CONFIG = {
     v1: { url: GITHUB_V1 + '.git', dir: path.join(REPOS_DIR, 'v1') },
     v2: { url: GITHUB_V2,          dir: path.join(REPOS_DIR, 'v2') }
 }
+const repoReady = { v1: false, v2: false } // true seulement une fois clone + install terminés
 
-function cloneOrUpdateRepo(key) {
+async function cloneOrUpdateRepo(key) {
     const { url, dir } = REPO_CONFIG[key]
+    const opts = { maxBuffer: 1024 * 1024 * 20 }
     try {
         if (!fs.existsSync(dir)) {
             console.log(`📥 Clonage du repo ${key} (${url})...`)
             fs.mkdirSync(REPOS_DIR, { recursive: true })
-            execSync(`git clone --depth 1 "${url}" "${dir}"`, { stdio: 'inherit' })
+            await execAsync(`git clone --depth 1 "${url}" "${dir}"`, opts)
         } else {
             console.log(`🔄 Mise à jour du repo ${key}...`)
-            try { execSync(`git -C "${dir}" pull --ff-only`, { stdio: 'inherit' }) }
+            try { await execAsync(`git -C "${dir}" pull --ff-only`, opts) }
             catch (e) { console.error(`⚠️ Pull échoué pour ${key}, on garde la version locale existante:`, e.message) }
         }
-        if (fs.existsSync(path.join(dir, 'package.json'))) {
+        if (fs.existsSync(path.join(dir, 'package.json')) && !fs.existsSync(path.join(dir, 'node_modules'))) {
             console.log(`📦 Installation des dépendances du repo ${key}...`)
-            execSync('npm install --omit=dev', { cwd: dir, stdio: 'inherit' })
+            await execAsync('npm install --omit=dev', { ...opts, cwd: dir })
         }
+        repoReady[key] = true
+        console.log(`✅ Repo ${key} prêt`)
     } catch (e) {
         console.error(`❌ Erreur clonage/maj du repo ${key}:`, e.message)
     }
 }
 
-async function prepareRepos() {
-    for (const key of Object.keys(REPO_CONFIG)) cloneOrUpdateRepo(key)
+// Ne bloque JAMAIS le serveur HTTP : chaque repo se prépare en tâche de fond
+function prepareRepos() {
+    for (const key of Object.keys(REPO_CONFIG)) {
+        cloneOrUpdateRepo(key).catch(e => console.error(`Erreur repo ${key}:`, e.message))
+    }
 }
 
 function saveSession(number, version) {
@@ -222,8 +232,8 @@ app.post('/pair', async function(req, res) {
     const number = req.body.number
     const version = req.body.version === 'v1' ? 'v1' : 'v2'
     if (!number || number.replace(/[^0-9]/g, '').length < 7) return res.json({ error: 'Numero invalide' })
-    if (!REPO_CONFIG[version] || !fs.existsSync(REPO_CONFIG[version].dir)) {
-        return res.json({ error: `Repo ${version} pas encore prêt sur le serveur, réessaie dans quelques instants` })
+    if (!REPO_CONFIG[version] || !repoReady[version]) {
+        return res.json({ error: `Le bot ${version} est encore en préparation sur le serveur, réessaie dans quelques instants` })
     }
     const clean = number.replace(/[^0-9]/g, '')
     pendingCodes.set(clean, { status: 'pending', code: null, error: null })
@@ -577,10 +587,11 @@ return `<!DOCTYPE html>
 }
 
 const PORT = process.env.PORT || 3000
-app.listen(PORT, async function() {
+app.listen(PORT, function() {
     console.log('AKANE MD Web Pair -> http://localhost:' + PORT)
-    await prepareRepos()
-    await restoreSessions()
+    // Ne pas attendre : le serveur doit répondre immédiatement (health check Render, etc.)
+    prepareRepos()
+    restoreSessions().catch(e => console.error('Erreur restoreSessions:', e.message))
 })
 
 export { startSocket as startWebpairSocket, getConnectedCount, isReallyConnected }
