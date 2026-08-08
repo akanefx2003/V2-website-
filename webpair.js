@@ -7,7 +7,7 @@ import fs from 'fs'
 const app = express()
 app.use(express.json())
 
-const CHANNEL_LINK = 'https://whatsapp.com/channel/0029Vb8JcmVEVccLHB0tUY2D'
+const CHANNEL_LINK = 'https://whatsapp.com/channel/0029Vb865EJ0QeapgV7MkP2D'
 const GITHUB_V1    = 'https://github.com/akanefx2003/AKANE_MD'
 const GITHUB_V2    = 'https://github.com/akanefx2003/AKANE-MD-V2.git'
 const STORE_LINK   = 'https://v2-five-lyart.vercel.app'
