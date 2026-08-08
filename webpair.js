@@ -56,10 +56,10 @@ async function cloneOrUpdateRepo(key) {
     }
 }
 
-// Ne bloque JAMAIS le serveur HTTP : chaque repo se prépare en tâche de fond
-function prepareRepos() {
+// Ne bloque JAMAIS le serveur HTTP, mais installe un repo à la fois (évite de saturer le CPU/RAM en parallèle)
+async function prepareRepos() {
     for (const key of Object.keys(REPO_CONFIG)) {
-        cloneOrUpdateRepo(key).catch(e => console.error(`Erreur repo ${key}:`, e.message))
+        try { await cloneOrUpdateRepo(key) } catch (e) { console.error(`Erreur repo ${key}:`, e.message) }
     }
 }
 
@@ -255,6 +255,7 @@ app.get('/code/:number', function(req, res) {
 app.get('/stats', function(req, res) { res.json({ connected: getConnectedCount() }) })
 app.get('/ping',  function(req, res) { res.send('pong') })
 app.get('/health',function(req, res) { res.json({ status: 'ok', uptime: process.uptime() }) })
+app.get('/status',function(req, res) { res.json({ v1: repoReady.v1, v2: repoReady.v2 }) })
 
 setInterval(function() { console.log('keep-alive') }, 4 * 60 * 1000)
 
