@@ -1,0 +1,16 @@
+{
+  "name": "akane-md-webpair",
+  "version": "2.0.0",
+  "type": "module",
+  "main": "webpair.js",
+  "scripts": {
+    "start": "node webpair.js",
+    "dev": "node --watch webpair.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "baileys": "latest",
+    "pino": "latest"
+  },
+  "engines": { "node": ">=18" }
+}
