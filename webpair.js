@@ -9,7 +9,7 @@ app.use(express.json())
 
 const CHANNEL_LINK = 'https://whatsapp.com/channel/0029Vb8JcmVEVccLHB0tUY2D'
 const GITHUB_V1    = 'https://github.com/akanefx2003/AKANE_MD'
-const GITHUB_V2    = 'https://github.com/akanefx2003/AKANE_MD_V2'
+const GITHUB_V2    = 'https://github.com/akanefx2003/AKANE-MD-V2.git'
 const STORE_LINK   = 'https://v2-five-lyart.vercel.app'
 const YOUTUBE_LINK = 'https://youtube.com/@akanefx-j3k9o?si=umMPewjZUzcOhilE'
 
