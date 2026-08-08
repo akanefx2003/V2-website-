@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "baileys": "latest",
+    "@crysnovax/bailey": "latest",
     "pino": "latest"
   },
   "engines": { "node": ">=18" }
