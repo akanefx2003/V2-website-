@@ -65,8 +65,12 @@ async function cloneOrUpdateRepo(key) {
             catch (e) { console.error(`⚠️ Pull échoué pour ${key}, on garde la version locale existante:`, e.message) }
         }
         if (fs.existsSync(path.join(dir, 'package.json')) && !fs.existsSync(path.join(dir, 'node_modules'))) {
-            console.log(`📦 Installation des dépendances du repo ${key}...`)
-            await runCmd('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--prefer-offline'], { cwd: dir }, 8 * 60 * 1000)
+            const hasLock = fs.existsSync(path.join(dir, 'package-lock.json'))
+            console.log(`📦 Installation des dépendances du repo ${key} (${hasLock ? 'npm ci' : 'npm install'})...`)
+            const installArgs = hasLock
+                ? ['ci', '--omit=dev', '--no-audit', '--no-fund']
+                : ['install', '--omit=dev', '--no-audit', '--no-fund', '--prefer-offline']
+            await runCmd('npm', installArgs, { cwd: dir }, 10 * 60 * 1000)
         }
         repoReady[key] = true
         console.log(`✅ Repo ${key} prêt`)
