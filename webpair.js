@@ -3,7 +3,7 @@ import express from 'express'
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
-import { REPO_CONFIG, repoReady, prepareRepos } from './repoManager.js'
+import { REPO_CONFIG, repoReady, repoCommit, prepareRepos } from './repoManager.js'
 
 const app = express()
 app.use(express.json())
@@ -161,7 +161,7 @@ app.get('/code/:number', function(req, res) {
 app.get('/stats', function(req, res) { res.json({ connected: getConnectedCount() }) })
 app.get('/ping',  function(req, res) { res.send('pong') })
 app.get('/health',function(req, res) { res.json({ status: 'ok', uptime: process.uptime() }) })
-app.get('/status',function(req, res) { res.json({ v1: repoReady.v1, v2: repoReady.v2 }) })
+app.get('/status',function(req, res) { res.json({ v1: repoReady.v1, v2: repoReady.v2, v1_commit: repoCommit.v1, v2_commit: repoCommit.v2 }) })
 
 setInterval(function() { console.log('keep-alive') }, 4 * 60 * 1000)
 
