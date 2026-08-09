@@ -13,6 +13,18 @@ export const REPO_CONFIG = {
     v2: { url: GITHUB_V2,          dir: path.join(REPOS_DIR, 'v2') }
 }
 export const repoReady = { v1: false, v2: false } // true seulement une fois clone + install terminés
+export const repoCommit = { v1: null, v2: null }  // hash court du commit actuellement checkouté, pour vérifier ce qui tourne vraiment
+
+// Exécute une commande et renvoie sa sortie stdout (utilisé pour lire le hash de commit)
+function runCmdCapture(cmd, args, opts = {}) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(cmd, args, opts)
+        let out = ''
+        child.stdout?.on('data', d => { out += d })
+        child.on('close', code => code === 0 ? resolve(out.trim()) : reject(new Error(`${cmd} a échoué (code ${code})`)))
+        child.on('error', reject)
+    })
+}
 
 // Exécute une commande avec logs en direct + timeout strict (tue le process s'il dépasse le délai)
 function runCmd(cmd, args, opts = {}, timeoutMs = 5 * 60 * 1000) {
@@ -58,7 +70,8 @@ export async function cloneOrUpdateRepo(key) {
             await runCmd('npm', installArgs, { cwd: dir }, 10 * 60 * 1000)
         }
         repoReady[key] = true
-        console.log(`✅ Repo ${key} prêt`)
+        try { repoCommit[key] = await runCmdCapture('git', ['-C', dir, 'rev-parse', '--short', 'HEAD']) } catch (e) { repoCommit[key] = 'inconnu' }
+        console.log(`✅ Repo ${key} prêt (commit ${repoCommit[key]})`)
     } catch (e) {
         console.error(`❌ Erreur clonage/maj du repo ${key}:`, e.message)
     }
