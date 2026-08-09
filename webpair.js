@@ -150,6 +150,20 @@ app.post('/pair', function(req, res) {
     }
 })
 
+app.post('/disconnect', function(req, res) {
+    const number = (req.body.number || '').replace(/[^0-9]/g, '')
+    const version = req.body.version === 'v1' ? 'v1' : 'v2'
+    if (!number) return res.json({ error: 'Numero invalide' })
+    const key = botKey(number, version)
+    const entry = activeBots.get(key)
+    if (!entry) return res.json({ ok: true, note: 'Aucun process actif pour ce numéro/version côté serveur' })
+    try { entry.child.kill('SIGKILL') } catch (e) {}
+    activeBots.delete(key)
+    removeSession(number)
+    pendingCodes.set(key, { status: 'error', code: null, error: 'Déconnecté manuellement' })
+    res.json({ ok: true })
+})
+
 app.get('/code/:number', function(req, res) {
     const clean = req.params.number.replace(/[^0-9]/g, '')
     const version = req.query.version === 'v1' ? 'v1' : 'v2'
