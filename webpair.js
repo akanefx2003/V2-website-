@@ -23,6 +23,47 @@ const INSTANCES_DIR = './instances' // config + session par numéro (léger, pas
 // sinon spawnBot() pense que c'est "le même bot" et tue le process de l'autre version silencieusement.
 function botKey(number, version) { return `${version}:${number}` }
 
+// ── V1 : serveur interne dédié (pair.js tourne tel quel, un seul process partagé
+// pour tous les numéros v1 — pas un process par numéro, pour éviter la race condition
+// sur configmanager.js/config.json que provoquerait un process séparé par numéro) ──
+const V1_INTERNAL_PORT = 3001
+const V1_BASE_URL = `http://127.0.0.1:${V1_INTERNAL_PORT}`
+let v1Process = null
+let v1Ready   = false
+
+function startV1Server() {
+    if (v1Process) return
+    const repoDir = REPO_CONFIG.v1?.dir
+    if (!repoDir || !repoReady.v1) return
+
+    console.log('🚀 Démarrage du serveur interne v1 (pair.js)...')
+    v1Process = spawn('node', ['pair.js'], {
+        cwd: repoDir,
+        env: { ...process.env, PORT: String(V1_INTERNAL_PORT) },
+        stdio: ['ignore', 'pipe', 'pipe']
+    })
+
+    v1Process.stdout.on('data', d => {
+        const text = d.toString()
+        process.stdout.write(`[v1-server] ${text}`)
+        if (/AKANE MD Web Pair/i.test(text)) v1Ready = true
+    })
+    v1Process.stderr.on('data', d => process.stderr.write(`[v1-server:err] ${d}`))
+
+    v1Process.on('exit', code => {
+        console.log(`⚠️ Serveur interne v1 arrêté (code ${code}) — redémarrage dans 5s`)
+        v1Process = null
+        v1Ready = false
+        setTimeout(startV1Server, 5000)
+    })
+}
+
+// Attend que le repo v1 soit prêt (cloné/installé) avant de démarrer le serveur interne
+function watchV1Ready() {
+    if (repoReady.v1) { startV1Server(); return }
+    setTimeout(watchV1Ready, 2000)
+}
+
 function saveSession(number, version) {
     try {
         if (!fs.existsSync('./sessions')) fs.mkdirSync('./sessions', { recursive: true })
@@ -129,6 +170,7 @@ async function restoreSessions() {
     list = list.map(entry => typeof entry === 'string' ? { number: entry, version: 'v2' } : entry)
     for (const { number, version } of list) {
         const v = version || 'v2'
+        if (v === 'v1') continue // pair.js restaure ses propres sessions v1 en interne, tout seul
         const instDir = instanceDirFor(v, number)
         if (!fs.existsSync(path.join(instDir, 'sessions'))) { removeSession(number); continue }
         try { spawnBot(number, v, true) } catch (e) { console.error(`Erreur restauration +${number}:`, e.message) }
@@ -136,11 +178,25 @@ async function restoreSessions() {
     }
 }
 
-app.post('/pair', function(req, res) {
+app.post('/pair', async function(req, res) {
     const number = req.body.number
     const version = req.body.version === 'v1' ? 'v1' : 'v2'
     if (!number || number.replace(/[^0-9]/g, '').length < 7) return res.json({ error: 'Numero invalide' })
     const clean = number.replace(/[^0-9]/g, '')
+
+    if (version === 'v1') {
+        if (!v1Ready) return res.json({ error: 'Le bot v1 est encore en préparation sur le serveur, réessaie dans quelques instants' })
+        try {
+            const r = await fetch(`${V1_BASE_URL}/pair`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ number: clean })
+            })
+            return res.json(await r.json())
+        } catch (e) {
+            return res.json({ error: 'Serveur v1 injoignable : ' + e.message })
+        }
+    }
+
     try {
         spawnBot(clean, version, false)
         res.json({ ok: true, number: clean })
@@ -150,10 +206,15 @@ app.post('/pair', function(req, res) {
     }
 })
 
-app.post('/disconnect', function(req, res) {
+app.post('/disconnect', async function(req, res) {
     const number = (req.body.number || '').replace(/[^0-9]/g, '')
     const version = req.body.version === 'v1' ? 'v1' : 'v2'
     if (!number) return res.json({ error: 'Numero invalide' })
+
+    if (version === 'v1') {
+        return res.json({ error: 'Déconnexion v1 non disponible pour le moment — redéploie le bot pour libérer ce numéro.' })
+    }
+
     const key = botKey(number, version)
     const entry = activeBots.get(key)
     if (!entry) return res.json({ ok: true, note: 'Aucun process actif pour ce numéro/version côté serveur' })
@@ -164,18 +225,38 @@ app.post('/disconnect', function(req, res) {
     res.json({ ok: true })
 })
 
-app.get('/code/:number', function(req, res) {
+app.get('/code/:number', async function(req, res) {
     const clean = req.params.number.replace(/[^0-9]/g, '')
     const version = req.query.version === 'v1' ? 'v1' : 'v2'
+
+    if (version === 'v1') {
+        try {
+            const r = await fetch(`${V1_BASE_URL}/code/${clean}`)
+            return res.json(await r.json())
+        } catch (e) {
+            return res.json({ status: 'error', error: 'Serveur v1 injoignable' })
+        }
+    }
+
     const entry = pendingCodes.get(botKey(clean, version))
     if (!entry) return res.json({ status: 'not_found' })
     res.json(entry)
 })
 
-app.get('/stats', function(req, res) { res.json({ connected: getConnectedCount() }) })
+app.get('/stats', async function(req, res) {
+    let v1Count = 0
+    if (v1Ready) {
+        try {
+            const r = await fetch(`${V1_BASE_URL}/stats`)
+            const d = await r.json()
+            v1Count = d.connected || 0
+        } catch (e) {}
+    }
+    res.json({ connected: getConnectedCount() + v1Count })
+})
 app.get('/ping',  function(req, res) { res.send('pong') })
 app.get('/health',function(req, res) { res.json({ status: 'ok', uptime: process.uptime() }) })
-app.get('/status',function(req, res) { res.json({ v1: repoReady.v1, v2: repoReady.v2 }) })
+app.get('/status',function(req, res) { res.json({ v1: v1Ready, v2: repoReady.v2 }) })
 
 setInterval(function() { console.log('keep-alive') }, 4 * 60 * 1000)
 
@@ -513,6 +594,7 @@ app.listen(PORT, function() {
     // Ne pas attendre : le serveur doit répondre immédiatement (health check Render, etc.)
     prepareRepos()
     restoreSessions().catch(e => console.error('Erreur restoreSessions:', e.message))
+    watchV1Ready() // démarre pair.js (v1) dès que le repo v1 est prêt
 })
 
 export { spawnBot as startWebpairBot, getConnectedCount }
