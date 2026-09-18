@@ -5,7 +5,9 @@
   "main": "webpair.js",
   "scripts": {
     "start": "node webpair.js",
-    "dev": "node --watch webpair.js"
+    "dev": "node --watch webpair.js",
+    "start:runner": "node runner-server.js",
+    "build:runner": "node prepare-repos.js"
   },
   "dependencies": {
     "express": "^4.18.2",
