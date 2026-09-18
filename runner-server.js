@@ -14,11 +14,7 @@ app.use(express.json())
 // ── Sécurité : seule webpair.js (le front sur Render) doit pouvoir appeler cette API.
 // Sans ça, n'importe qui trouvant l'URL du runner pourrait faire tourner des bots à ta
 // place. Définis la MÊME valeur pour RUNNER_KEY sur Téo Héberg et sur Render.
-const RUNNER_KEY = process.env.RUNNER_KEY || ''
-if (!RUNNER_KEY) {
-    console.error('❌ RUNNER_KEY manquante — définis cette variable d\'env sur Téo Héberg avant de démarrer.')
-    process.exit(1)
-}
+const RUNNER_KEY = 'e4de5de21e9774a38ec82b1d9c8e326be247850488cbf804'
 function requireRunnerKey(req, res, next) {
     if (req.get('x-runner-key') !== RUNNER_KEY) return res.status(401).json({ error: 'Clé runner invalide' })
     next()
